@@ -30,6 +30,10 @@ pin1 = [2, 4, 6]
 pin2 = [3, 5, 7]
 
 grovepi.pinMode(pir_sensor,"INPUT")
+for i in [0, 1]:
+    grovepi.pinMode(pin1[i], "OUTPUT")
+    grovepi.pinMode(pin2[i], "OUTPUT")
+
 
 
 #def pir(arg):
@@ -78,36 +82,56 @@ def hello():
     data["Luminosity"] = luminosity
     data["Motion"] = motion
     data["Humidity"] = humidity
-    data["Led/1"] = _led_1
-    data["Led/2"] = _led_2
-    data["Led/3"] = _led_3
+    data["Led1"] = _led_1
+    data["Led2"] = _led_2
+    data["Led3"] = _led_3
     data["Motor"] = _motor
     
     motion=0	
     return jsonify(data)
 
 
-@app.route("/Led/1", methods=['PUT'])
+@app.route("/Led1", methods=['PUT'])
 def put_Led_1():
     global _led_1
     print "got:", request.data
     _led_1 = int(request.data)
+    if _led_1==1:
+	grovepi.digitalWrite(pin1[0], 1)
+        grovepi.digitalWrite(pin2[0], 0)
+    else:
+	grovepi.digitalWrite(pin1[0], 0)
+        grovepi.digitalWrite(pin2[0], 0)		
     return request.data
 
 
-@app.route("/Led/2", methods=['PUT'])
+@app.route("/Led2", methods=['PUT'])
 def put_Led_2():
     global _led_2
     print "got:", request.data
     _led_2 = int(request.data)
+    if _led_2==1:
+	grovepi.digitalWrite(pin1[1], 1)
+        grovepi.digitalWrite(pin2[1], 0)
+    else:
+	grovepi.digitalWrite(pin1[1], 0)
+        grovepi.digitalWrite(pin2[1], 0)		
+
     return request.data
 
 
-@app.route("/Led/3", methods=['PUT'])
+@app.route("/Led3", methods=['PUT'])
 def put_Led_3():
     global _led_3
     print "got:", request.data
     _led_3 = int(request.data)
+    if _led_3==1:
+	grovepi.digitalWrite(pin1[2], 1)
+        grovepi.digitalWrite(pin2[2], 0)
+    else:
+	grovepi.digitalWrite(pin1[2], 0)
+        grovepi.digitalWrite(pin2[2], 0)		
+
     return request.data
 
 
