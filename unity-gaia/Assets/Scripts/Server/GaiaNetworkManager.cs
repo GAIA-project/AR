@@ -32,6 +32,11 @@ public class GaiaNetworkManager : MonoBehaviour
     MqttClient client;
 
     private StatusJson lastServerStatus;
+    private string MQTT_IP = "150.140.5.11";
+    private string MQTT_USERNAME = "gaiaar";
+    private string MQTT_PASSWORD = "pGr6MiZrWjwbbi";
+
+    private string ARIMAGE_SERVER_IP = "";
 
     // Use this for initialization
     void Start()
@@ -137,16 +142,16 @@ public class GaiaNetworkManager : MonoBehaviour
     IEnumerator GetAccessToken()
     {
         // create client instance 
-        client = new MqttClient(IPAddress.Parse("150.140.5.20"), 80, false, null);
+        client = new MqttClient(IPAddress.Parse(MQTT_IP), 1883, false, null);
         yield return client;
 
         // register to message received 
         client.MqttMsgPublishReceived += client_MqttMsgPublishReceived;
 
-        string clientId = Guid.NewGuid().ToString();
-        client.Connect(clientId);
+        //string clientId = Guid.NewGuid().ToString();
+        client.Connect(MQTT_USERNAME, MQTT_USERNAME, MQTT_PASSWORD);
 
-        ParseAndSubscribe("http://0013a200409c168b/0xd13/temp,0013a200409c168b/0xd13/sound,0013a200409c168b/0xd13/pir,0013a200409c168b/0xd13/light,0013a200409c168b/0xd13/humid");
+        //ParseAndSubscribe("http://150.140.5.11:8082/v1/link/test");
 
         // subscribe to the topic
         //client.Subscribe(new string[] { "#" }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
@@ -165,21 +170,43 @@ public class GaiaNetworkManager : MonoBehaviour
             return;
         }
 
-        text = text.Replace("http://", "");
-        string[] sensors = text.Split(',');
-
-        HashSet<string> topics = new HashSet<string>();
-
-        foreach (string sensor in sensors)
+        StartCoroutine(GetMQTTResourcesFromServer(text, (resources) => 
         {
-            var topic = sensor.Split('/')[0];
-            Debug.Log(topic);
-            topics.Add(topic.Trim());
+            if (resources == null)
+            {
+                Debug.Log("Resources is null..");
+                return;
+            }
+
+            HashSet<string> topics = new HashSet<string>();
+
+            foreach (string sensor in resources.resources)
+            {
+                var topic = sensor.Split('/')[0];
+                Debug.Log(topic);
+                topics.Add(topic.Trim());
+            }
+
+            String[] stringArray = new String[topics.Count];
+            topics.CopyTo(stringArray);
+
+            client.Subscribe(stringArray, new byte[] { MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
+        }));
+    }
+
+    public IEnumerator GetMQTTResourcesFromServer(string url, Action<ARImageResources> finished)
+    {
+        Debug.Log("Getting MQTT resources from server...");
+        using (UnityWebRequest www = UnityWebRequest.Get(url))
+        {
+            yield return www.SendWebRequest();
+
+            var resourcesJSON = JsonUtility.FromJson<ARImageResources>(www.downloadHandler.text);
+            if (finished != null)
+            {
+                finished(resourcesJSON);
+            }
         }
-
-        String[] stringArray = new String[topics.Count];
-        topics.CopyTo(stringArray);
-
-        client.Subscribe(stringArray, new byte[] { MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
     }
 }
+
