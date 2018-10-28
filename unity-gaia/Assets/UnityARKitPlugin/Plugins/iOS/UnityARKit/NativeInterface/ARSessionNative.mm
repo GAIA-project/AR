@@ -8,8 +8,8 @@
 #include "ARKitDefines.h"
 
 // These don't all need to be static data, but no other better place for them at the moment.
-static id <MTLTexture> s_CapturedImageTextureY;
-static id <MTLTexture> s_CapturedImageTextureCbCr;
+static id <MTLTexture> s_CapturedImageTextureY = NULL;
+static id <MTLTexture> s_CapturedImageTextureCbCr = NULL;
 static UnityARMatrix4x4 s_CameraProjectionMatrix;
 
 static float s_AmbientIntensity;
@@ -222,11 +222,16 @@ inline void UnityARFaceAnchorDataFromARFaceAnchorPtr(UnityARFaceAnchorData& anch
 {
     anchorData.identifier = (void*)[nativeAnchor.identifier.UUIDString UTF8String];
     ARKitMatrixToUnityARMatrix4x4(nativeAnchor.transform, &anchorData.transform);
-    ARKitMatrixToUnityARMatrix4x4(nativeAnchor.leftEyeTransform, &anchorData.leftEyeTransform);
-    ARKitMatrixToUnityARMatrix4x4(nativeAnchor.rightEyeTransform, &anchorData.rightEyeTransform);
-    anchorData.lookAtPoint = UnityARVector3{nativeAnchor.lookAtPoint.x, nativeAnchor.lookAtPoint.y, nativeAnchor.lookAtPoint.z};
+    if (UnityIsARKit_2_0_Supported())
+    {
+        ARKitMatrixToUnityARMatrix4x4(nativeAnchor.leftEyeTransform, &anchorData.leftEyeTransform);
+        ARKitMatrixToUnityARMatrix4x4(nativeAnchor.rightEyeTransform, &anchorData.rightEyeTransform);
+        anchorData.lookAtPoint = UnityARVector3{nativeAnchor.lookAtPoint.x, nativeAnchor.lookAtPoint.y, nativeAnchor.lookAtPoint.z};
+    }
+
     UnityARFaceGeometryFromARFaceGeometry(anchorData.faceGeometry, nativeAnchor.geometry);
     anchorData.blendShapes = (__bridge void *) nativeAnchor.blendShapes;
+    anchorData.isTracked = (uint32_t) nativeAnchor.isTracked;
 }
 #endif
 
@@ -421,6 +426,7 @@ static UnityPixelBuffer s_UnityPixelBuffers;
 {
     if (self = [super init])
     {
+        _textureCache = NULL;
         _classToCallbackMap = [[NSMutableDictionary alloc] init];
     }
     return self;
@@ -428,14 +434,19 @@ static UnityPixelBuffer s_UnityPixelBuffers;
 
 - (void)setupMetal
 {
+    if (_textureCache != NULL)
+    {
+        return;
+    }
     _device = MTLCreateSystemDefaultDevice();
     CVMetalTextureCacheCreate(NULL, NULL, _device, NULL, &_textureCache);
 }
 
 - (void)teardownMetal
 {
-    if (_textureCache) {
+    if (_textureCache != NULL) {
         CFRelease(_textureCache);
+        _textureCache = NULL;
     }
 }
 
@@ -484,7 +495,10 @@ static CGAffineTransform s_CurAffineTransform;
     UnityARMatrix4x4FromCGAffineTransform(displayTransform, s_CurAffineTransform, UIInterfaceOrientationIsLandscape(orientation));
     unityARCamera.displayTransform = displayTransform;
     
-    unityARCamera.worldMappingStatus = GetUnityARWorldMappingStatusFromARWorldMappingStatus(frame.worldMappingStatus);
+    if (UnityIsARKit_2_0_Supported())
+    {
+        unityARCamera.worldMappingStatus = GetUnityARWorldMappingStatusFromARWorldMappingStatus(frame.worldMappingStatus);
+    }
 
     if (_frameCallback != NULL)
     {
@@ -571,6 +585,9 @@ static CGAffineTransform s_CurAffineTransform;
         if(status == kCVReturnSuccess)
         {
             textureY = CVMetalTextureGetTexture(texture);
+        }
+        if (texture != NULL)
+        {
             CFRelease(texture);
         }
     }
@@ -586,6 +603,9 @@ static CGAffineTransform s_CurAffineTransform;
         if(status == kCVReturnSuccess)
         {
             textureCbCr = CVMetalTextureGetTexture(texture);
+        }
+        if (texture != NULL)
+        {
             CFRelease(texture);
         }
     }
@@ -773,6 +793,18 @@ extern "C" void session_SetImageAnchorCallbacks(const void* session, UNITY_AR_IM
     }
 }
 
+extern "C" void* session_GetARKitSessionPtr(const void* session)
+{
+    UnityARSession* nativeSession = (__bridge UnityARSession*)session;
+    return (__bridge void*)nativeSession->_session;
+}
+
+extern "C" void* session_GetARKitFramePtr(const void* session)
+{
+    UnityARSession* nativeSession = (__bridge UnityARSession*)session;
+    return (__bridge void*)nativeSession->_session.currentFrame;
+}
+
 extern "C" void StartWorldTrackingSessionWithOptions(void* nativeSession, ARKitWorldTrackingSessionConfiguration unityConfig, UnityARSessionRunOptions runOptions)
 {
     UnityARSession* session = (__bridge UnityARSession*)nativeSession;
@@ -875,6 +907,7 @@ extern "C" void PauseSession(void* nativeSession)
 {
     UnityARSession* session = (__bridge UnityARSession*)nativeSession;
     [session->_session pause];
+    [session teardownMetal];
 }
 
 extern "C" void StopSession(void* nativeSession)
@@ -889,7 +922,10 @@ extern "C" UnityARUserAnchorData SessionAddUserAnchor(void* nativeSession, Unity
     // then return the data back to the user that they will
     // need in case they want to remove it
     UnityARSession* session = (__bridge UnityARSession*)nativeSession;
-    ARAnchor *newAnchor = [[ARAnchor alloc] initWithTransform:matrix_identity_float4x4];
+    
+    matrix_float4x4 anchor_transform = matrix_identity_float4x4;
+    UnityARMatrix4x4ToARKitMatrix(anchorData.transform, &anchor_transform);
+    ARAnchor *newAnchor = [[ARAnchor alloc] initWithTransform:anchor_transform];
     
     [session->_session addAnchor:newAnchor];
     UnityARUserAnchorData returnAnchorData;
@@ -1006,6 +1042,18 @@ extern "C" UnityARTextureHandles GetVideoTextureHandles()
     return handles;
 }
 
+extern "C" void ReleaseVideoTextureHandles(UnityARTextureHandles handles)
+{
+    if (handles.textureY != NULL)
+    {
+        CFRelease(handles.textureY);
+    }
+    if (handles.textureCbCr != NULL)
+    {
+        CFRelease(handles.textureCbCr);
+    }
+}
+
 extern "C" bool GetARPointCloud(float** verts, unsigned int* vertLength)
 {
     *verts = (float*)s_PointCloud;
@@ -1057,6 +1105,11 @@ extern "C" void EnumerateVideoFormats(UNITY_AR_VIDEOFORMAT_CALLBACK videoFormatC
 extern "C" bool Native_IsARKit_1_5_Supported()
 {
     return UnityIsARKit_1_5_Supported();
+}
+
+extern "C" bool Native_IsARKit_2_0_Supported()
+{
+    return UnityIsARKit_2_0_Supported();
 }
 
 extern "C" bool IsARKitFaceTrackingConfigurationSupported()

@@ -60,7 +60,7 @@ GameObject:
   - component: {fileID: 114923786832821460}
   - component: {fileID: 114067811851456300}
   - component: {fileID: 114619093822242126}
-  m_Layer: 9
+  m_Layer: 8
   m_Name: 2o-dhmotiko-paralias
   m_TagString: School
   m_Icon: {fileID: 0}

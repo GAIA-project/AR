@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.iOS;
 using TMPro;
+using Zenject;
 
 public class GaiaGenerateImageAnchor : MonoBehaviour
 {
@@ -12,22 +13,33 @@ public class GaiaGenerateImageAnchor : MonoBehaviour
     private ARReferenceImage referenceImage;
 
     [SerializeField]
-    private GameObject prefabToGenerate;
-    public GameObject cubePrefab;
+    private ARReferenceImage sensorReferenceImage;
+
+    [SerializeField]
+    private ARReferenceImage anchorImage;
+    [SerializeField]
+    private ARReferenceImage anchorImageCopy;
+
+    public GameObject prefabToGenerate;
+    public GameObject sensorPrefab;
+
+    private GameObject sensorGeneratedPrefab;
+
     public GameObject axisPrefab;
 
     private GameObject imageAnchorGO;
 
-    //private List<GameObject> cubes = new List<GameObject>();
+    public BarcodeCanvas barcodeCanvas;
 
-    //private float cubeWidth = 0f;
+    [Inject]
+    GaiaNetworkManager networkManager;
 
     // Use this for initialization
     void Start()
     {
         UnityARSessionNativeInterface.ARImageAnchorAddedEvent += AddImageAnchor;
         UnityARSessionNativeInterface.ARImageAnchorUpdatedEvent += UpadteImageAnchor;
-        UnityARSessionNativeInterface.ARImageAnchorRemovedEvent += RemoveImageAnchor;
+        //UnityARSessionNativeInterface.ARImageAnchorRemovedEvent += RemoveImageAnchor;
         //Instantiate(prefabToGenerate, newObjectPosition, Quaternion.identity);
     }
 
@@ -38,59 +50,124 @@ public class GaiaGenerateImageAnchor : MonoBehaviour
         Vector3 position = UnityARMatrixOps.GetPosition(arImageAnchor.transform);
         Quaternion rotation = UnityARMatrixOps.GetRotation(arImageAnchor.transform);
 
-        if (arImageAnchor.referenceImageName == referenceImage.imageName) {
+        if (arImageAnchor.referenceImageName == referenceImage.imageName)
+        {
             //imageAnchorGO = Instantiate<GameObject> (prefabToGenerate, position, rotation);
-            CreateBarChart(position, rotation);
+            //CreateBarChart(position, rotation);
+            //CreateGaiaPlane(arImageAnchor, position, rotation);
         }
         //else {
         //    CreateGaiaPlane(arImageAnchor, position, rotation);
         //}
+        else if (arImageAnchor.referenceImageName == sensorReferenceImage.imageName)
+        {
+            if (barcodeCanvas != null) {
+                Debug.Log("Barcode canvas is not null");
+                barcodeCanvas.SetScanType(BarcodeCamera.Type.InfoSensor);
+                barcodeCanvas.Show();
+            }
+            CreateSensorPlane(arImageAnchor, position, rotation);
+        }
+        else if (arImageAnchor.referenceImageName == anchorImage.imageName)
+        {
+            Debug.Log("Top-left anchor found at location: " + position.ToString());
+            firstAnchorPosition = position;
+        }
+        else if (arImageAnchor.referenceImageName == anchorImageCopy.imageName)
+        {
+            Debug.Log("Bottom-right anchor found at location: " + position.ToString());
+
+            Vector3 size = position - firstAnchorPosition;
+            Vector3 centerPos = firstAnchorPosition + size / 2f;
+            //GenerateMesh(size.x, size.z);
+
+            CreateGaiaPlane(null, centerPos, rotation);
+        }
     }
 
+    private Vector3 firstAnchorPosition;
+    private void GenerateMesh(float width, float height)
+    {
+        GameObject plane = new GameObject("Plane");
+        MeshFilter meshFilter = (MeshFilter)plane.AddComponent(typeof(MeshFilter));
+        meshFilter.mesh = CreateMesh(width, height);
+        MeshRenderer renderer = plane.AddComponent(typeof(MeshRenderer)) as MeshRenderer;
+        renderer.material.shader = Shader.Find("Particles/Additive");
+        Texture2D tex = new Texture2D(1, 1);
+        tex.SetPixel(0, 0, Color.green);
+        tex.Apply();
+        renderer.material.mainTexture = tex;
+        renderer.material.color = Color.green;
+    }
+
+    Mesh CreateMesh(float width, float height)
+    {
+        Mesh m = new Mesh();
+        m.name = "ScriptedMesh";
+        m.vertices = new Vector3[] {
+            firstAnchorPosition,
+            firstAnchorPosition + new Vector3(width, 0f, 0f),
+            firstAnchorPosition + new Vector3(0f, 0f, height),
+            firstAnchorPosition + new Vector3(width, 0f, height)
+        };
+        m.uv = new Vector2[] {
+            new Vector2 (0, 0),
+            new Vector2 (0, 1),
+            new Vector2(1, 1),
+            new Vector2 (1, 0)
+        };
+        m.triangles = new int[] { 0, 1, 2, 0, 2, 3 };
+        m.RecalculateNormals();
+
+        return m;
+    }
+
+    public void instantiate() {
+        CreateGaiaPlane(null, new Vector3(0.5f, 0.5f, 0.5f), Quaternion.identity);
+    }
+
+    private void CreateSensorPlane(ARImageAnchor arImageAnchor, Vector3 position, Quaternion rotation)
+    {
+        sensorGeneratedPrefab = Instantiate<GameObject>(sensorPrefab, position, rotation);
+        sensorGeneratedPrefab.SetActive(true);
+    }
+
+
+    GameObject generatedPrefab;
+    GameObject led2;
     private void CreateGaiaPlane(ARImageAnchor arImageAnchor, Vector3 position, Quaternion rotation)
     {
-        GameObject cube = Instantiate<GameObject>(axisPrefab, position, rotation);
+        generatedPrefab = Instantiate<GameObject>(prefabToGenerate, position, rotation);
+        generatedPrefab.SetActive(true);
+    }
 
-        position = UnityARMatrixOps.GetPosition(arImageAnchor.transform);
-        rotation = UnityARMatrixOps.GetRotation(arImageAnchor.transform);
-
-        Vector3 size = cube.GetComponent<BoxCollider>().bounds.size;
-
-        //position = new Vector3(position.x - arImageAnchor.referenceImagePhysicalSize / 2f, position.y + size.y, position.z);
-
-        Instantiate<GameObject>(axisPrefab, position, rotation);
-
-        //cube.transform.localScale = new Vector3(0.05f, 0.05f, 0.05f);
-
-        //PlaneHitResult result = PlaneHitTest();
-        //if (result != null)
-        //{
-        //    cube.transform.position = result.position;
-        //    //cube.transform.rotation = result.rotation;
+    //float total = 0.1f;
+    //float aspect = 0.29f / 0.21f;
+    public void increasePostion() {
+        //if (generatedPrefab != null) {
+        //    total += 0.01f;
+        //    generatedPrefab.transform.localScale = new Vector3(total, 1f, total / aspect);
         //}
+        //Debug.Log("scale " + total.ToString());
+    }
+
+    //float totalScale = 0.05f;
+    public void descreasePostion()
+    {
+        //if(generatedPrefab != null) {
+        //    total -= 0.005f;
+        //    generatedPrefab.transform.localScale = new Vector3(total, 1f, total / aspect);
+        //}
+        //Debug.Log("scale " + total.ToString());
     }
 
     void UpadteImageAnchor(ARImageAnchor arImageAnchor)
     {
-        //Debug.Log ("image anchor updated");
         if (arImageAnchor.referenceImageName == referenceImage.imageName) {
-        //	imageAnchorGO.transform.position = UnityARMatrixOps.GetPosition (arImageAnchor.transform);
-        //	imageAnchorGO.transform.rotation = UnityARMatrixOps.GetRotation (arImageAnchor.transform);
-
             Vector3 position = UnityARMatrixOps.GetPosition(arImageAnchor.transform);
 
-            textMesh.transform.position = position;
-            textMesh.transform.rotation = Quaternion.AngleAxis(90, Vector3.right);
+            generatedPrefab.transform.position = position + new Vector3(0.02f, 0f, 0.005f);
         }
-
-        //Vector3 position = UnityARMatrixOps.GetPosition(arImageAnchor.transform);
-        //Quaternion rotation = UnityARMatrixOps.GetRotation(arImageAnchor.transform);
-
-        //for (int i = 0; i < 5; i++)
-        //{
-        //    Vector3 newPosition = new Vector3(position.x + i * cubeWidth, cubes[i].transform.position.y, position.z);
-        //    cubes[i].transform.position = newPosition;
-        //}
     }
 
     void RemoveImageAnchor(ARImageAnchor arImageAnchor)
@@ -118,29 +195,6 @@ public class GaiaGenerateImageAnchor : MonoBehaviour
 
     private void CreateBarChart(Vector3 position, Quaternion rotation)
     {
-        //Quaternion newRotation = new Quaternion(rotation.x, rotation.y - 90f, rotation.z, rotation.w);
-
-        //for (int i = 0; i < 5; i++)
-        //{
-        //    float heightScale = 0.05f * Random.Range(1f, 5f);
-        //    Vector3 newPosition = new Vector3(position.x + i * cubeWidth, position.y + heightScale / 2f, position.z);
-
-        //    GameObject cube = Instantiate<GameObject>(prefabToGenerate, newPosition, newRotation);
-        //    cube.transform.localScale = new Vector3(0.05f, heightScale, 0.05f);
-
-        //    cubeWidth = cube.transform.localScale.x;
-
-        //    cubes.Add(cube);
-        //}
-
-        //float heightScale = 0.05f * Random.Range(1f, 5f);
-        //Vector3 newPosition = new Vector3(position.x, position.y + 0.05f / 2f, position.z);
-
-        //cube = Instantiate<GameObject>(cubePrefab, position, rotation);
-        //cube.transform.localScale = new Vector3(0.05f, heightScale, 0.05f);
-
-        //newPosition = new Vector3(position.x, position.y, position.z);
-
         // text gameobject
         textObject = Instantiate<GameObject>(prefabToGenerate, position, rotation);
         textObject.GetComponent<TextComponent>().enabled = true;
@@ -150,17 +204,6 @@ public class GaiaGenerateImageAnchor : MonoBehaviour
 
         textMesh.transform.position = position;
         textMesh.transform.rotation = Quaternion.AngleAxis(90, Vector3.right);
-
-        //temperatureText.transform.rotation = rotation;
-
-        //PlaneHitResult result = PlaneHitTest();
-        //if (result != null)
-        //{
-        //    textObject.transform.position = result.position;
-        //    textObject.transform.rotation = result.rotation;
-        //}
-
-        //StartCoroutine(ChangeTemperature());
     }
 
     public PlaneHitResult PlaneHitTest()
@@ -258,10 +301,45 @@ public class GaiaGenerateImageAnchor : MonoBehaviour
     }
 
     int angle = 90;
+
     public void RotateHorizontal()
     {
         textObject.transform.rotation = Quaternion.AngleAxis(angle, Vector3.right);
         angle += 90;
+    }
+
+    private void Update()
+    {
+        if (Input.touchCount == 1 && Input.touches[0].phase ==TouchPhase.Began) {
+            HitTestNextPreviousButtons(Input.touches[0].position);
+        }
+    }
+
+    private void HitTestNextPreviousButtons(Vector2 position)
+    {
+        //use center of screen for focusing
+        Vector3 center = new Vector3(position.x, position.y, 0.2f);
+
+        //#if UNITY_EDITOR
+        Ray ray = Camera.main.ScreenPointToRay(center);
+        RaycastHit hit;
+
+        //we'll try to hit one of the plane collider gameobjects
+        if (Physics.Raycast(ray, out hit, LayerMask.NameToLayer("LabControls")))
+        {
+            GameObject hitObject = hit.collider.gameObject;
+
+            if (hitObject.name.Equals("Next"))
+            {
+                generatedPrefab.GetComponent<InstructionsController>().ShowNext();
+            }
+            else if (hitObject.name.Equals("Previous"))
+            {
+                generatedPrefab.GetComponent<InstructionsController>().ShowPrevious();
+            }
+
+            return;
+        }
     }
 
 }

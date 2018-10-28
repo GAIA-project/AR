@@ -113,7 +113,7 @@ namespace uPLibrary.Networking.M2Mqtt.Messages
             buffer = new byte[remainingLength];
 
             // read bytes from socket...
-            int received = channel.Receive(buffer);
+            //int received = channel.Receive(buffer);
 
             // read QoS level from fixed header
             msg.qosLevel = (byte)((fixedHeaderFirstByte & QOS_LEVEL_MASK) >> QOS_LEVEL_OFFSET);

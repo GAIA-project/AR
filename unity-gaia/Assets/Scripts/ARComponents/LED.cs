@@ -23,7 +23,7 @@ public class LED : MonoBehaviour, ISelfUpdate {
 
     // Use this for initialization
     void Start () {
-        id = int.Parse(gameObject.name.Split()[1]);
+        int.TryParse(gameObject.name.Split()[1], out id);
         statusKey = "Led" + id;
 	}
 	

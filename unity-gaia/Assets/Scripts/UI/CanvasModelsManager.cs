@@ -73,6 +73,7 @@ public class CanvasModelsManager : MonoBehaviour {
 
     public void HitTestSchoolGrid(Vector3 position)
     {
+        //Debug.Log("School hit test: " + position);
         Ray ray = Camera.main.ScreenPointToRay(position);
         RaycastHit hit;
 

@@ -43,7 +43,7 @@ namespace uPLibrary.Networking.M2Mqtt.Messages
             MqttMsgDisconnect msg = new MqttMsgDisconnect();
 
             // get remaining length and allocate buffer
-            int remainingLength = MqttMsgBase.decodeRemainingLength(channel);
+            // int remainingLength = MqttMsgBase.decodeRemainingLength(channel);
             // NOTE : remainingLength must be 0
 
             return msg;

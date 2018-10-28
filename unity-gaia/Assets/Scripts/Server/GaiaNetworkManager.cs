@@ -2,6 +2,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Net;
+using System.Text;
+using ChartAndGraph;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -11,16 +13,6 @@ using Zenject;
 
 public class GaiaNetworkManager : MonoBehaviour
 {
-
-    class Response
-    {
-        public string access_token;
-        public string token_type;
-        public string refresh_type;
-        public string expires_in;
-        public string scope;
-    }
-
     public InputField ipInputField;
 
     private String IP_ADDRESS = "http://150.140.5.100:5000/";
@@ -36,7 +28,17 @@ public class GaiaNetworkManager : MonoBehaviour
     private string MQTT_USERNAME = "gaiaar";
     private string MQTT_PASSWORD = "pGr6MiZrWjwbbi";
 
-    private string ARIMAGE_SERVER_IP = "";
+    // Visualization Managers
+    TemperatureManager temperatureManager;
+    SensorInfoManager sensorInfoManager;
+
+    [Inject]
+    private void Construct(TemperatureManager _temperatureManager,
+                          SensorInfoManager _sensorInfoManager)
+    {
+        temperatureManager = _temperatureManager;
+        sensorInfoManager = _sensorInfoManager;
+    }
 
     // Use this for initialization
     void Start()
@@ -151,7 +153,8 @@ public class GaiaNetworkManager : MonoBehaviour
         //string clientId = Guid.NewGuid().ToString();
         client.Connect(MQTT_USERNAME, MQTT_USERNAME, MQTT_PASSWORD);
 
-        //ParseAndSubscribe("http://150.140.5.11:8082/v1/link/test");
+        //ParseAndSubscribe("https://qr.gaia-project.eu/v1/link/e24dc214599868d3819d7db8c05a0242");
+        //ParseAndSubscribeForInfo("https://qr.gaia-project.eu/v1/link/43b20e9e9996e5f7d61e8a9499a14130");
 
         // subscribe to the topic
         //client.Subscribe(new string[] { "#" }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
@@ -159,10 +162,67 @@ public class GaiaNetworkManager : MonoBehaviour
 
     private void client_MqttMsgPublishReceived(object sender, MqttMsgPublishEventArgs e)
     {
-        Debug.Log("Message received, topic: " + e.Topic + " , message: " + e.Message);
+        string message = Encoding.UTF8.GetString(e.Message);
+        Debug.Log("Message received, topic: " + e.Topic + " , message: " + message);
+
+        string[] values = message.Split('/')[1].Split('+');
+        foreach (string val in values)
+        {
+            if (val.Contains(","))
+            {
+                string key = val.Split(',')[0].Trim();
+                string value = val.Split(',')[1];
+
+                if (key.Equals(Enum.GetName(typeof(VisualizationManager.DATA_TYPE), VisualizationManager.DATA_TYPE.temp)))
+                {
+                    //Debug.Log("updating temperature");
+                    temperatureManager.UpdateValues(float.Parse(value));
+                    sensorInfoManager.UpdateValues(float.Parse(value));
+                }
+            }
+
+        }
+    }
+
+    public void ParseAndSubscribeForInfo(String text)
+    {
+        ParseAndReturnResult(text, (success) =>
+        {
+            if (!success)
+            {
+                Debug.Log("Couldn't parse and subscribe to sensor");
+                return;
+            }
+
+            // sensor barcode scanned. add the sensor overlay to the SensorInfoManager
+            var overlay = GameObject.FindGameObjectWithTag("SensorInfoOverlay");
+            sensorInfoManager.AddComponent(overlay);
+        });
     }
 
     public void ParseAndSubscribe(String text)
+    {
+        ParseAndReturnResult(text, (success) =>
+        {
+            if (!success)
+            {
+                Debug.Log("Couldn't parse and subscribe to sensor");
+                return;
+            }
+
+            // sensor barcode scanned. Let's create and display a chart
+            GameObject obj = Resources.Load<GameObject>("Prefabs/GraphPrefabs/Bar3D");
+            GameObject parent = Instantiate(obj, new Vector3(0f, -2f, 1f), Quaternion.identity);
+
+            var graph = parent.transform.GetChild(0).gameObject;
+            graph.transform.localPosition = new Vector3(0f, 2f, 0f);
+            graph.name = graph.name.Replace("(Clone)", "");
+
+            temperatureManager.AddComponent(graph);
+        });
+    }
+
+    private void ParseAndReturnResult(String text, Action<bool> success)
     {
         if (client == null)
         {
@@ -170,12 +230,12 @@ public class GaiaNetworkManager : MonoBehaviour
             return;
         }
 
-        StartCoroutine(GetMQTTResourcesFromServer(text, (resources) => 
+        StartCoroutine(GetMQTTResourcesFromServer(text, (resources) =>
         {
             if (resources == null)
             {
                 Debug.Log("Resources is null..");
-                return;
+                success(false);
             }
 
             HashSet<string> topics = new HashSet<string>();
@@ -191,22 +251,33 @@ public class GaiaNetworkManager : MonoBehaviour
             topics.CopyTo(stringArray);
 
             client.Subscribe(stringArray, new byte[] { MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
+
+            success(true);
         }));
     }
 
     public IEnumerator GetMQTTResourcesFromServer(string url, Action<ARImageResources> finished)
     {
         Debug.Log("Getting MQTT resources from server...");
+        float startTime = Time.realtimeSinceStartup;
+
         using (UnityWebRequest www = UnityWebRequest.Get(url))
         {
             yield return www.SendWebRequest();
 
+            Debug.Log("MQTT resources: " + www.downloadHandler.text);
+
+            float responseTime = Time.realtimeSinceStartup - startTime;
+            TimeProfiler.Instance.AddLog(System.DateTime.Now, TimeModel.Action.MQTTServer, responseTime);
+
             var resourcesJSON = JsonUtility.FromJson<ARImageResources>(www.downloadHandler.text);
-            if (finished != null)
-            {
-                finished(resourcesJSON);
-            }
+            finished(resourcesJSON);
         }
+    }
+
+    void OnApplicationQuit()
+    {
+        TimeProfiler.Instance.SaveLogs();
     }
 }
 

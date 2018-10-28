@@ -91,12 +91,12 @@ namespace UnityEngine.XR.iOS
         public static UnityARUserAnchorData UnityARUserAnchorDataFromGameObject(GameObject go)
         {
             // create an anchor data struct from a game object transform
-            Matrix4x4 matrix = Matrix4x4.TRS(go.transform.position, go.transform.rotation, go.transform.localScale);
-            UnityARUserAnchorData ad = new UnityARUserAnchorData();
-            ad.transform.column0 = matrix.GetColumn(0);
-            ad.transform.column1 = matrix.GetColumn(1);
-            ad.transform.column2 = matrix.GetColumn(2);
-            ad.transform.column3 = matrix.GetColumn(3);
+            Matrix4x4 arkitTransform = UnityARMatrixOps.UnityToARKitCoordChange(go.transform.position, go.transform.rotation);
+           UnityARUserAnchorData ad = new UnityARUserAnchorData();
+            ad.transform.column0 = arkitTransform.GetColumn(0);
+            ad.transform.column1 = arkitTransform.GetColumn(1);
+            ad.transform.column2 = arkitTransform.GetColumn(2);
+            ad.transform.column3 = arkitTransform.GetColumn(3);
             return ad;
         }
     }
@@ -366,7 +366,7 @@ namespace UnityEngine.XR.iOS
 #if !UNITY_EDITOR && UNITY_IOS
         private IntPtr m_NativeARSession;
 
-        
+
         [DllImport("__Internal")]
         private static extern IntPtr unity_CreateNativeARSession();
 
@@ -383,25 +383,31 @@ namespace UnityEngine.XR.iOS
 			Action<IntPtr, IntPtr> sessionRefObjExtractCompletionHandler);
 
         [DllImport("__Internal")]
-        private static extern void session_SetPlaneAnchorCallbacks(IntPtr nativeSession, internal_ARAnchorAdded anchorAddedCallback, 
-                                            internal_ARAnchorUpdated anchorUpdatedCallback, 
+        private static extern void session_SetPlaneAnchorCallbacks(IntPtr nativeSession, internal_ARAnchorAdded anchorAddedCallback,
+                                            internal_ARAnchorUpdated anchorUpdatedCallback,
                                             internal_ARAnchorRemoved anchorRemovedCallback);
 
         [DllImport("__Internal")]
-        private static extern void session_SetUserAnchorCallbacks(IntPtr nativeSession, internal_ARUserAnchorAdded userAnchorAddedCallback, 
-                                            internal_ARUserAnchorUpdated userAnchorUpdatedCallback, 
+        private static extern void session_SetUserAnchorCallbacks(IntPtr nativeSession, internal_ARUserAnchorAdded userAnchorAddedCallback,
+                                            internal_ARUserAnchorUpdated userAnchorUpdatedCallback,
                                             internal_ARUserAnchorRemoved userAnchorRemovedCallback);
 
         [DllImport("__Internal")]
-        private static extern void session_SetImageAnchorCallbacks(IntPtr nativeSession, internal_ARImageAnchorAdded imageAnchorAddedCallback, 
-            internal_ARImageAnchorUpdated imageAnchorUpdatedCallback, 
+        private static extern void session_SetImageAnchorCallbacks(IntPtr nativeSession, internal_ARImageAnchorAdded imageAnchorAddedCallback,
+            internal_ARImageAnchorUpdated imageAnchorUpdatedCallback,
             internal_ARImageAnchorRemoved imageAnchorRemovedCallback);
 
         [DllImport("__Internal")]
-        private static extern void session_SetFaceAnchorCallbacks(IntPtr nativeSession, internal_ARFaceAnchorAdded faceAnchorAddedCallback, 
-            internal_ARFaceAnchorUpdated faceAnchorUpdatedCallback, 
+        private static extern void session_SetFaceAnchorCallbacks(IntPtr nativeSession, internal_ARFaceAnchorAdded faceAnchorAddedCallback,
+            internal_ARFaceAnchorUpdated faceAnchorUpdatedCallback,
             internal_ARFaceAnchorRemoved faceAnchorRemovedCallback);
 
+        [DllImport("__Internal")]
+        private static extern IntPtr session_GetARKitSessionPtr(IntPtr nativeSession);
+
+        [DllImport("__Internal")]
+        private static extern IntPtr session_GetARKitFramePtr(IntPtr nativeSession);
+    
         [DllImport("__Internal")]
         private static extern void StartWorldTrackingSession(IntPtr nativeSession, ARKitWorldTrackingSessionConfiguration configuration);
 
@@ -430,7 +436,10 @@ namespace UnityEngine.XR.iOS
         private static extern UnityARHitTestResult GetLastHitTestResult(int index);
 
         [DllImport("__Internal")]
-        private static extern ARTextureHandles GetVideoTextureHandles();
+        private static extern ARTextureHandles.ARTextureHandlesStruct GetVideoTextureHandles();
+
+        [DllImport("__Internal")]
+        public static extern void ReleaseVideoTextureHandles(ARTextureHandles.ARTextureHandlesStruct handles);
 
         [DllImport("__Internal")]
         private static extern float GetAmbientIntensity();
@@ -460,6 +469,9 @@ namespace UnityEngine.XR.iOS
         private static extern bool Native_IsARKit_1_5_Supported();
 
         [DllImport("__Internal")]
+        private static extern bool Native_IsARKit_2_0_Supported();
+
+        [DllImport("__Internal")]
         private static extern void session_GetCurrentWorldMap(IntPtr nativeSession, IntPtr callbackPtr);
 
 		[DllImport("__Internal")]
@@ -487,12 +499,21 @@ namespace UnityEngine.XR.iOS
 #endif
         }
 
+        public static bool IsARKit_2_0_Supported()
+        {
+#if !UNITY_EDITOR && UNITY_IOS
+            return Native_IsARKit_2_0_Supported();
+#else
+            return true;  //since we might need to do some editor shenanigans
+#endif
+        }
+
         public UnityARSessionNativeInterface()
         {
 #if !UNITY_EDITOR && UNITY_IOS
             m_NativeARSession = unity_CreateNativeARSession();
-            session_SetSessionCallbacks(m_NativeARSession, _frame_update, _ar_session_failed, _ar_session_interrupted, 
-            _ar_session_interruption_ended, _ar_session_should_relocalize, _ar_tracking_changed, _ar_session_get_world_map_completion_handler, 
+            session_SetSessionCallbacks(m_NativeARSession, _frame_update, _ar_session_failed, _ar_session_interrupted,
+            _ar_session_interruption_ended, _ar_session_should_relocalize, _ar_tracking_changed, _ar_session_get_world_map_completion_handler,
 			_ar_session_ref_obj_extract_completion_handler);
             session_SetPlaneAnchorCallbacks(m_NativeARSession, _anchor_added, _anchor_updated, _anchor_removed);
             session_SetUserAnchorCallbacks(m_NativeARSession, _user_anchor_added, _user_anchor_updated, _user_anchor_removed);
@@ -550,7 +571,25 @@ namespace UnityEngine.XR.iOS
             return s_UnityARSessionNativeInterface;
         }
 
-#if UNITY_EDITOR 
+        public IntPtr GetNativeSessionPtr()
+        {
+#if !UNITY_EDITOR && UNITY_IOS
+            return session_GetARKitSessionPtr(m_NativeARSession);
+#else
+            return IntPtr.Zero;
+#endif
+        }
+
+        public IntPtr GetNativeFramePtr()
+        {
+#if !UNITY_EDITOR && UNITY_IOS
+            return session_GetARKitFramePtr(m_NativeARSession);
+#else
+            return IntPtr.Zero;
+#endif
+        }
+
+#if UNITY_EDITOR
         public static void SetStaticCamera(UnityARCamera scamera)
         {
             s_Camera = scamera;
@@ -739,7 +778,7 @@ namespace UnityEngine.XR.iOS
         [MonoPInvokeCallback(typeof(internal_ARSessionTrackingChanged))]
         static void _ar_tracking_changed(internal_UnityARCamera camera)
         {
-            // we only update the current camera's tracking state since that's all 
+            // we only update the current camera's tracking state since that's all
             // this cllback is for
             s_Camera.trackingState = camera.trackingState;
             s_Camera.trackingReason = camera.trackingReason;
@@ -826,7 +865,7 @@ namespace UnityEngine.XR.iOS
             if (ARAnchorUpdatedEvent != null)
             {
                 ARPlaneAnchor arPlaneAnchor = new ARPlaneAnchor(anchor);
-                ARAnchorUpdatedEvent(arPlaneAnchor); 
+                ARAnchorUpdatedEvent(arPlaneAnchor);
             }
         }
 
@@ -876,12 +915,14 @@ namespace UnityEngine.XR.iOS
 
         #region Face Anchors
 #if !UNITY_EDITOR && UNITY_IOS
+        static ARFaceAnchor arFaceAnchor;
+
         [MonoPInvokeCallback(typeof(internal_ARFaceAnchorAdded))]
         static void _face_anchor_added(UnityARFaceAnchorData anchor)
         {
             if (ARFaceAnchorAddedEvent != null)
             {
-                ARFaceAnchor arFaceAnchor = new ARFaceAnchor(anchor);
+                arFaceAnchor = new ARFaceAnchor(anchor);
                 ARFaceAnchorAddedEvent(arFaceAnchor);
             }
         }
@@ -891,7 +932,7 @@ namespace UnityEngine.XR.iOS
         {
             if (ARFaceAnchorUpdatedEvent != null)
             {
-                ARFaceAnchor arFaceAnchor = new ARFaceAnchor(anchor);
+                arFaceAnchor.Update(anchor);
                 ARFaceAnchorUpdatedEvent(arFaceAnchor); }
         }
 
@@ -900,7 +941,7 @@ namespace UnityEngine.XR.iOS
         {
             if (ARFaceAnchorRemovedEvent != null)
             {
-                ARFaceAnchor arFaceAnchor = new ARFaceAnchor(anchor);
+                arFaceAnchor.Update(anchor);
                 ARFaceAnchorRemovedEvent(arFaceAnchor);
             }
         }
@@ -1054,7 +1095,7 @@ namespace UnityEngine.XR.iOS
             results.Clear();
 #if !UNITY_EDITOR && UNITY_IOS
                 int numResults = HitTest(m_NativeARSession, point, types);
-    
+
                 for (int i = 0; i < numResults; ++i)
                 {
                         var result = GetLastHitTestResult(i);
@@ -1070,7 +1111,11 @@ namespace UnityEngine.XR.iOS
 #if !UNITY_EDITOR && UNITY_IOS
         public ARTextureHandles GetARVideoTextureHandles()
         {
-            return GetVideoTextureHandles ();
+#if !UNITY_EDITOR && UNITY_IOS
+            return new ARTextureHandles(GetVideoTextureHandles());
+#else
+            return new ARTextureHandles(new ARTextureHandles.ARTextureHandlesStruct { textureY = IntPtr.Zero, textureCbCr = IntPtr.Zero });
+#endif
         }
 
         [Obsolete("Hook ARFrameUpdatedEvent instead and get UnityARCamera.ambientIntensity")]
@@ -1084,7 +1129,7 @@ namespace UnityEngine.XR.iOS
         {
             return GetTrackingQuality();
         }
-#endif       
+#endif
 
         public UnityARUserAnchorData AddUserAnchor(UnityARUserAnchorData anchorData)
         {
@@ -1097,8 +1142,8 @@ namespace UnityEngine.XR.iOS
 
         public UnityARUserAnchorData AddUserAnchorFromGameObject(GameObject go) {
 #if !UNITY_EDITOR && UNITY_IOS
-            UnityARUserAnchorData data = AddUserAnchor(UnityARUserAnchorData.UnityARUserAnchorDataFromGameObject(go)); 
-            return data;  
+            UnityARUserAnchorData data = AddUserAnchor(UnityARUserAnchorData.UnityARUserAnchorDataFromGameObject(go));
+            return data;
 #else
             return new UnityARUserAnchorData();
 #endif
